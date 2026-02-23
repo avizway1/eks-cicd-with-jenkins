@@ -1,0 +1,469 @@
+<!DOCTYPE html>
+<html lang="en" xmlns:th="http://www.thymeleaf.org">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>EKS CI/CD App — Aviz Academy</title>
+  <style>
+    /* ── Reset & Base ── */
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: #f0f4f8; color: #1a202c; min-height: 100vh;
+    }
+
+    /* ── Header ── */
+    header {
+      background: linear-gradient(135deg, #0f2027 0%, #1a3c5e 60%, #2d6a9f 100%);
+      color: #fff; padding: 1.5rem 2rem;
+      display: flex; align-items: center; gap: 1rem;
+      box-shadow: 0 2px 8px rgba(0,0,0,0.3);
+    }
+    header .app-icon { font-size: 2.2rem; }
+    header h1 { font-size: 1.6rem; font-weight: 700; letter-spacing: 0.5px; }
+    header p  { font-size: 0.85rem; opacity: 0.8; margin-top: 2px; }
+    .pipeline-badge {
+      background: rgba(255,255,255,0.15); border: 1px solid rgba(255,255,255,0.3);
+      border-radius: 20px; padding: 0.35rem 0.9rem;
+      font-size: 0.78rem; margin-left: auto; white-space: nowrap;
+    }
+    /* Info chips in header */
+    .header-meta {
+      display: flex; gap: 0.5rem; flex-wrap: wrap; margin-top: 0.4rem;
+    }
+    .chip {
+      background: rgba(255,255,255,0.12); border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 12px; padding: 0.15rem 0.6rem; font-size: 0.72rem; color: #e2e8f0;
+    }
+    .chip span { color: #7dd3fc; font-weight: 600; }
+
+    /* ── Main Layout ── */
+    main { max-width: 1100px; margin: 2.5rem auto; padding: 0 1.5rem; }
+
+    /* ── Pipeline Banner ── */
+    .arch-banner {
+      background: #fff; border-left: 4px solid #2d6a9f;
+      border-radius: 8px; padding: 1rem 1.4rem; margin-bottom: 2rem;
+      font-size: 0.88rem; line-height: 1.7;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.07);
+    }
+    .arch-banner strong { color: #2d6a9f; }
+    .flow { display: flex; align-items: center; gap: 0.4rem; flex-wrap: wrap; margin-top: 0.5rem; }
+    .flow .node  { background: #e8f0fe; color: #1a3c5e; border-radius: 4px; padding: 0.2rem 0.6rem; font-weight: 600; font-size: 0.82rem; }
+    .flow .arrow { color: #6b7280; font-size: 1rem; }
+
+    /* ── Cards Grid ── */
+    .cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 1.5rem; }
+
+    /* ── Card ── */
+    .card { background: #fff; border-radius: 12px; box-shadow: 0 2px 10px rgba(0,0,0,0.08); overflow: hidden; transition: transform 0.2s, box-shadow 0.2s; }
+    .card:hover { transform: translateY(-3px); box-shadow: 0 6px 18px rgba(0,0,0,0.12); }
+    .card-header { padding: 1.1rem 1.4rem; display: flex; align-items: center; gap: 0.75rem; }
+    .card-header .icon { font-size: 1.6rem; }
+    .card-header h2 { font-size: 1.05rem; font-weight: 700; }
+    .card-header p  { font-size: 0.78rem; opacity: 0.85; margin-top: 2px; }
+    /* colour themes */
+    .card.bmi      .card-header { background: linear-gradient(135deg, #1a3c5e, #2d6a9f); color: #fff; }
+    .card.interest .card-header { background: linear-gradient(135deg, #155724, #28a745); color: #fff; }
+    .card.age      .card-header { background: linear-gradient(135deg, #6b21a8, #9333ea); color: #fff; }
+    .card-body { padding: 1.4rem; }
+
+    /* ── API endpoint tag ── */
+    .api-tag {
+      display: inline-flex; align-items: center; gap: 0.3rem;
+      background: rgba(0,0,0,0.25); border: 1px solid rgba(255,255,255,0.2);
+      border-radius: 4px; padding: 0.18rem 0.55rem;
+      font-size: 0.72rem; font-family: 'Courier New', monospace;
+      font-weight: 700; margin-top: 4px;
+    }
+    .api-tag .method { color: #fbbf24; }
+    .api-tag .path   { color: #d1fae5; }
+    .java-tag { font-size: 0.7rem; opacity: 0.75; margin-top: 3px; font-style: italic; }
+
+    /* ── Form Controls ── */
+    .form-group { margin-bottom: 1rem; }
+    label { display: block; font-size: 0.82rem; font-weight: 600; color: #374151; margin-bottom: 0.35rem; }
+    input[type="number"],
+    input[type="text"] {
+      width: 100%; padding: 0.55rem 0.8rem;
+      border: 1.5px solid #d1d5db; border-radius: 6px;
+      font-size: 0.92rem; transition: border-color 0.2s; outline: none;
+    }
+    input:focus { border-color: #2d6a9f; }
+
+    /* ── Buttons ── */
+    .btn {
+      display: inline-flex; align-items: center; gap: 0.4rem;
+      width: 100%; justify-content: center;
+      padding: 0.65rem 1.2rem; border: none; border-radius: 7px;
+      font-size: 0.92rem; font-weight: 600; cursor: pointer;
+      transition: opacity 0.2s, transform 0.1s; margin-top: 0.5rem;
+    }
+    .btn:hover  { opacity: 0.88; }
+    .btn:active { transform: scale(0.98); }
+    .btn-bmi      { background: #2d6a9f; color: #fff; }
+    .btn-interest { background: #28a745; color: #fff; }
+    .btn-age      { background: #9333ea; color: #fff; }
+
+    /* ── Result Box ── */
+    .result {
+      margin-top: 1rem; padding: 0.9rem 1rem;
+      border-radius: 8px; font-size: 0.9rem; font-weight: 500;
+      display: none; line-height: 1.7;
+    }
+    .result.show    { display: block; }
+    .result.success { background: #d1fae5; color: #065f46; border: 1px solid #6ee7b7; }
+    .result.error   { background: #fee2e2; color: #7f1d1d; border: 1px solid #fca5a5; }
+
+    /* BMI category badge */
+    .bmi-badge {
+      display: inline-block; padding: 0.2rem 0.7rem;
+      border-radius: 20px; font-weight: 700; font-size: 0.9rem; margin-left: 6px;
+    }
+    .bmi-Underweight { background: #bfdbfe; color: #1e40af; }
+    .bmi-Normal      { background: #d1fae5; color: #065f46; }
+    .bmi-Overweight  { background: #fef3c7; color: #78350f; }
+    .bmi-Obese       { background: #fee2e2; color: #7f1d1d; }
+
+    /* Spinner */
+    .spinner {
+      display: inline-block; width: 14px; height: 14px;
+      border: 2px solid rgba(255,255,255,0.4); border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* ── API Activity Log Panel ── */
+    .log-panel {
+      background: #0f172a; border-radius: 12px;
+      margin-top: 2rem; overflow: hidden;
+      box-shadow: 0 4px 16px rgba(0,0,0,0.18);
+    }
+    .log-panel-header {
+      background: #1e293b; padding: 0.85rem 1.2rem;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .log-panel-header h3 { color: #e2e8f0; font-size: 0.92rem; font-weight: 700; display: flex; align-items: center; gap: 0.5rem; }
+    .dot { width: 8px; height: 8px; border-radius: 50%; background: #22c55e; animation: pulse 1.5s ease-in-out infinite; }
+    @keyframes pulse { 0%,100%{ opacity:1; } 50%{ opacity:0.3; } }
+    .btn-clear-log { background: #334155; color: #94a3b8; border: none; border-radius: 5px; padding: 0.3rem 0.75rem; font-size: 0.75rem; cursor: pointer; }
+    .btn-clear-log:hover { background: #475569; color: #e2e8f0; }
+    .log-body { padding: 0.75rem 1rem; max-height: 300px; overflow-y: auto; font-family: 'Courier New', monospace; font-size: 0.8rem; }
+    .log-empty { color: #475569; text-align: center; padding: 2rem 0; font-style: italic; }
+    .log-entry {
+      border-left: 3px solid #334155; padding: 0.5rem 0.75rem;
+      margin-bottom: 0.6rem; border-radius: 0 6px 6px 0;
+      background: #1e293b; animation: fadeIn 0.3s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(-4px); } to { opacity:1; transform:none; } }
+    .log-entry.success { border-left-color: #22c55e; }
+    .log-entry.error   { border-left-color: #ef4444; }
+    .log-time     { color: #64748b; font-size: 0.72rem; margin-bottom: 3px; }
+    .log-request  { color: #93c5fd; }
+    .log-payload  { color: #fcd34d; }
+    .log-response { color: #86efac; }
+    .log-err      { color: #fca5a5; }
+    .log-ms       { color: #a78bfa; font-size: 0.72rem; }
+
+    /* ── Footer ── */
+    footer { text-align: center; padding: 1.5rem; font-size: 0.8rem; color: #6b7280; margin-top: 2rem; }
+  </style>
+</head>
+<body>
+
+<!-- ══════════════════ HEADER ══════════════════ -->
+<header>
+  <span class="app-icon">☸️</span>
+  <div>
+    <h1 th:text="${appName}">EKS CI/CD App</h1>
+    <p>Aviz Academy — Jenkins + Docker + ECR + EKS Capstone</p>
+    <div class="header-meta">
+      <span class="chip">v<span th:text="${version}">1.0.0</span></span>
+      <span class="chip">Java <span th:text="${java}">17</span></span>
+      <span class="chip"><span th:text="${os}">Linux</span></span>
+      <span class="chip">Built <span th:text="${timestamp}">–</span></span>
+    </div>
+  </div>
+  <span class="pipeline-badge">🚀 CI/CD Pipeline Active</span>
+</header>
+
+<!-- ══════════════════ MAIN ══════════════════ -->
+<main>
+
+  <!-- CI/CD Architecture Banner -->
+  <div class="arch-banner">
+    <strong>How this got here (CI/CD Pipeline):</strong>
+    <div class="flow">
+      <span class="node">GitHub</span><span class="arrow">→</span>
+      <span class="node">Jenkins</span><span class="arrow">→</span>
+      <span class="node">Maven Build</span><span class="arrow">→</span>
+      <span class="node">Docker Build</span><span class="arrow">→</span>
+      <span class="node">ECR Push</span><span class="arrow">→</span>
+      <span class="node">EKS Deploy</span><span class="arrow">→</span>
+      <span class="node">You are here ✅</span>
+    </div>
+    <div style="margin-top:0.5rem; color:#4b5563; font-size:0.83rem;">
+      Every push to <strong>main</strong> triggers a full pipeline run — build, containerise, push to ECR,
+      rolling-update on EKS. Zero manual steps.
+    </div>
+  </div>
+
+  <!-- ══════════════════ CARDS ══════════════════ -->
+  <div class="cards">
+
+    <!-- ── Card 1 : BMI Calculator ── -->
+    <div class="card bmi">
+      <div class="card-header">
+        <span class="icon">⚖️</span>
+        <div>
+          <h2>BMI Calculator</h2>
+          <p>Body Mass Index from weight &amp; height</p>
+          <span class="api-tag">
+            <span class="method">POST</span>
+            <span class="path">/api/bmi</span>
+          </span>
+          <div class="java-tag">ApiController.bmi() → BMI formula</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="form-group">
+          <label for="bmi-weight">Weight (kg)</label>
+          <input type="number" id="bmi-weight" placeholder="e.g. 70" min="1" step="0.1" />
+        </div>
+        <div class="form-group">
+          <label for="bmi-height">Height (cm)</label>
+          <input type="number" id="bmi-height" placeholder="e.g. 175" min="1" />
+        </div>
+        <button class="btn btn-bmi" onclick="calcBmi(event)">
+          <span>Calculate BMI</span>
+        </button>
+        <div id="bmi-result" class="result"></div>
+      </div>
+    </div>
+
+    <!-- ── Card 2 : Interest Calculator ── -->
+    <div class="card interest">
+      <div class="card-header">
+        <span class="icon">📊</span>
+        <div>
+          <h2>Interest Calculator</h2>
+          <p>Simple interest on principal amount</p>
+          <span class="api-tag">
+            <span class="method">POST</span>
+            <span class="path">/api/interest</span>
+          </span>
+          <div class="java-tag">ApiController.interest() → SI formula</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="form-group">
+          <label for="si-principal">Principal Amount (₹)</label>
+          <input type="number" id="si-principal" placeholder="e.g. 10000" min="1" />
+        </div>
+        <div class="form-group">
+          <label for="si-rate">Annual Rate (%)</label>
+          <input type="number" id="si-rate" placeholder="e.g. 7.5" min="0.1" step="0.1" />
+        </div>
+        <div class="form-group">
+          <label for="si-years">Duration (Years)</label>
+          <input type="number" id="si-years" placeholder="e.g. 3" min="1" />
+        </div>
+        <button class="btn btn-interest" onclick="calcInterest(event)">
+          <span>Calculate Interest</span>
+        </button>
+        <div id="interest-result" class="result"></div>
+      </div>
+    </div>
+
+    <!-- ── Card 3 : Age Calculator ── -->
+    <div class="card age">
+      <div class="card-header">
+        <span class="icon">🎂</span>
+        <div>
+          <h2>Age Calculator</h2>
+          <p>Age, days lived &amp; heartbeats estimate</p>
+          <span class="api-tag">
+            <span class="method">POST</span>
+            <span class="path">/api/age</span>
+          </span>
+          <div class="java-tag">ApiController.age() → Year.now()</div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="form-group">
+          <label for="age-year">Birth Year</label>
+          <input type="number" id="age-year" placeholder="e.g. 1995" min="1900" max="2025" />
+        </div>
+        <button class="btn btn-age" onclick="calcAge(event)">
+          <span>Calculate Age</span>
+        </button>
+        <div id="age-result" class="result"></div>
+      </div>
+    </div>
+
+  </div><!-- /.cards -->
+
+  <!-- ══════════════════ LIVE API LOG ══════════════════ -->
+  <div class="log-panel">
+    <div class="log-panel-header">
+      <h3><span class="dot"></span>&nbsp; Live API Activity Log</h3>
+      <button class="btn-clear-log" onclick="clearLog()">Clear</button>
+    </div>
+    <div class="log-body" id="api-log">
+      <div class="log-empty" id="log-empty">No API calls yet — submit a form above to see live requests.</div>
+    </div>
+  </div>
+
+</main>
+
+<footer>
+  EKS CI/CD App v<span th:text="${version}">1.0.0</span>
+  &nbsp;|&nbsp; Aviz Academy Capstone
+  &nbsp;|&nbsp; Deployed via Jenkins → ECR → EKS (NodePort 30080)
+</footer>
+
+<!-- ══════════════════ JAVASCRIPT ══════════════════ -->
+<script>
+  // ── Utilities ──────────────────────────────────────────────────────────────
+  function setLoading(btn, loading, label) {
+    btn.disabled = loading;
+    btn.innerHTML = loading
+      ? '<span class="spinner"></span> Processing...'
+      : `<span>${label}</span>`;
+  }
+
+  function showResult(id, html, isError = false) {
+    const el = document.getElementById(id);
+    el.innerHTML = html;
+    el.className = 'result show ' + (isError ? 'error' : 'success');
+  }
+
+  // ── API Log ────────────────────────────────────────────────────────────────
+  function appendLog({ endpoint, payload, response, ms, isError }) {
+    const logEl   = document.getElementById('api-log');
+    const emptyEl = document.getElementById('log-empty');
+    if (emptyEl) emptyEl.remove();
+
+    const now = new Date().toLocaleTimeString('en-IN', { hour12: false });
+    const payloadStr  = Object.entries(payload).map(([k,v]) => `${k}=${v}`).join(', ');
+    const responseStr = JSON.stringify(response);
+
+    const entry = document.createElement('div');
+    entry.className = `log-entry ${isError ? 'error' : 'success'}`;
+    entry.innerHTML =
+      `<div class="log-time">${now}</div>` +
+      `<div class="log-request">► POST ${endpoint}</div>` +
+      `<div class="log-payload">  SENT     : ${payloadStr}</div>` +
+      (isError
+        ? `<div class="log-err">  ERROR    : ${responseStr}</div>`
+        : `<div class="log-response">  RESPONSE : ${responseStr}</div>`
+      ) +
+      `<div class="log-ms">  ⏱ ${ms} ms | Spring Boot → ApiController.java</div>`;
+    logEl.insertBefore(entry, logEl.firstChild);
+  }
+
+  function clearLog() {
+    document.getElementById('api-log').innerHTML =
+      '<div class="log-empty" id="log-empty">No API calls yet — submit a form above to see live requests.</div>';
+  }
+
+  // ── Shared fetch wrapper ───────────────────────────────────────────────────
+  async function post(endpoint, payload) {
+    const start = performance.now();
+    const res   = await fetch(endpoint, {
+      method: 'POST',
+      body: new URLSearchParams(payload)
+    });
+    const ms   = Math.round(performance.now() - start);
+    const data = await res.json();
+    appendLog({ endpoint, payload, response: data, ms, isError: !!data.error });
+    return data;
+  }
+
+  // ── Card 1 : BMI ──────────────────────────────────────────────────────────
+  async function calcBmi(e) {
+    const weight = document.getElementById('bmi-weight').value;
+    const height = document.getElementById('bmi-height').value;
+    const btn    = e.currentTarget;
+    if (!weight || !height) { showResult('bmi-result', '⚠️ Please fill in both fields.', true); return; }
+    setLoading(btn, true, 'Calculate BMI');
+    try {
+      const d = await post('/api/bmi', { weight, height });
+      if (d.error) {
+        showResult('bmi-result', '❌ ' + d.error, true);
+      } else {
+        showResult('bmi-result',
+          `⚖️ <strong>BMI:</strong> ${d.bmi} <span class="bmi-badge bmi-${d.category}">${d.category}</span><br>
+           💡 ${d.tip}`
+        );
+      }
+    } catch(err) {
+      showResult('bmi-result', '❌ Could not reach the server.', true);
+    } finally {
+      setLoading(btn, false, 'Calculate BMI');
+    }
+  }
+
+  // ── Card 2 : Interest ─────────────────────────────────────────────────────
+  async function calcInterest(e) {
+    const principal = document.getElementById('si-principal').value;
+    const rate      = document.getElementById('si-rate').value;
+    const years     = document.getElementById('si-years').value;
+    const btn       = e.currentTarget;
+    if (!principal || !rate || !years) { showResult('interest-result', '⚠️ Please fill in all fields.', true); return; }
+    setLoading(btn, true, 'Calculate Interest');
+    try {
+      const d = await post('/api/interest', { principal, rate, years });
+      if (d.error) {
+        showResult('interest-result', '❌ ' + d.error, true);
+      } else {
+        showResult('interest-result',
+          `📊 <strong>Simple Interest :</strong> ₹${d.interest.toLocaleString('en-IN', {minimumFractionDigits:2})}<br>
+           💰 <strong>Total Amount   :</strong> ₹${d.total.toLocaleString('en-IN', {minimumFractionDigits:2})}<br>
+           <small style="color:#065f46">Formula: P × R × T / 100 = ${principal} × ${rate} × ${years} / 100</small>`
+        );
+      }
+    } catch(err) {
+      showResult('interest-result', '❌ Could not reach the server.', true);
+    } finally {
+      setLoading(btn, false, 'Calculate Interest');
+    }
+  }
+
+  // ── Card 3 : Age ──────────────────────────────────────────────────────────
+  async function calcAge(e) {
+    const birthYear = document.getElementById('age-year').value;
+    const btn       = e.currentTarget;
+    if (!birthYear) { showResult('age-result', '⚠️ Please enter your birth year.', true); return; }
+    setLoading(btn, true, 'Calculate Age');
+    try {
+      const d = await post('/api/age', { birthYear });
+      if (d.error) {
+        showResult('age-result', '❌ ' + d.error, true);
+      } else {
+        showResult('age-result',
+          `🎂 <strong>Age         :</strong> ${d.age} years<br>
+           📅 <strong>Days Lived  :</strong> ~${d.daysLived.toLocaleString('en-IN')} days<br>
+           ❤️ <strong>Heartbeats  :</strong> ~${d.heartbeats.toLocaleString('en-IN')}<br>
+           🎉 <strong>Next B'day  :</strong> Year ${d.nextYear}`
+        );
+      }
+    } catch(err) {
+      showResult('age-result', '❌ Could not reach the server.', true);
+    } finally {
+      setLoading(btn, false, 'Calculate Age');
+    }
+  }
+
+  // Allow Enter key to trigger the relevant card
+  document.addEventListener('keydown', e => {
+    if (e.key !== 'Enter') return;
+    const id = document.activeElement?.id || '';
+    if      (id.startsWith('bmi'))  calcBmi({ currentTarget: document.querySelector('.btn-bmi') });
+    else if (id.startsWith('si-'))  calcInterest({ currentTarget: document.querySelector('.btn-interest') });
+    else if (id.startsWith('age'))  calcAge({ currentTarget: document.querySelector('.btn-age') });
+  });
+</script>
+
+</body>
+</html>
