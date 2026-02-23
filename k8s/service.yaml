@@ -1,0 +1,30 @@
+# =============================================================================
+# Service — exposes the Deployment via an AWS ALB/NLB
+# Type: LoadBalancer provisions an AWS Classic/NLB automatically.
+# Swap to ClusterIP + Ingress if you use the AWS Load Balancer Controller.
+# =============================================================================
+apiVersion: v1
+kind: Service
+metadata:
+  name: eks-cicd-app-service
+  namespace: eks-cicd
+  labels:
+    app: eks-cicd-app
+    team: avizway
+    app.kubernetes.io/name: eks-cicd-app
+  annotations:
+    # Internal NLB — remove this line for a public-facing load balancer
+    # service.beta.kubernetes.io/aws-load-balancer-internal: "true"
+
+    # Use NLB instead of the older Classic LB
+    service.beta.kubernetes.io/aws-load-balancer-type: "nlb"
+spec:
+  type: LoadBalancer
+  selector:
+    app: eks-cicd-app     # Must match Deployment pod labels
+  ports:
+    - name: http
+      protocol: TCP
+      port: 80             # External port clients connect to
+      targetPort: http     # Named port on the container (8080)
+  # sessionAffinity: None  # Stateless app — no sticky sessions needed

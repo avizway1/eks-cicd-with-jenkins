@@ -1,0 +1,11 @@
+# =============================================================================
+# Namespace — isolates all app resources from kube-system and other teams
+# =============================================================================
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: eks-cicd
+  labels:
+    team: avizway
+    environment: production
+    app.kubernetes.io/managed-by: jenkins
