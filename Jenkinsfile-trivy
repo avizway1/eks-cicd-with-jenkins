@@ -41,6 +41,13 @@ pipeline {
         // Java DB (~200 MB) and vuln-db (~50 MB) are downloaded here ONCE
         // and reused every run instead of being written to /tmp each time.
         TRIVY_CACHE_DIR = "/var/lib/jenkins/.cache/trivy"
+
+        // Override the OS temp directory used by Trivy for download staging.
+        // Without this, Trivy writes the Java DB to /tmp during download
+        // even when --cache-dir is set, causing "no space left on device"
+        // when /tmp is small. Pointing TMPDIR to Jenkins home (larger disk)
+        // keeps ALL Trivy I/O off the /tmp partition entirely.
+        TMPDIR          = "/var/lib/jenkins/trivy-tmp"
     }
 
     parameters {
@@ -105,7 +112,7 @@ pipeline {
             steps {
                 echo "Running Trivy filesystem scan..."
                 sh """
-                    mkdir -p ${TRIVY_CACHE_DIR}
+                    mkdir -p ${TRIVY_CACHE_DIR} ${TMPDIR}
 
                     trivy fs \
                         --exit-code 0 \
