@@ -15,8 +15,7 @@ pipeline {
     // Names MUST match what is configured in:
     // Manage Jenkins → Tools → Maven installations / JDK installations
     tools {
-        maven 'Maven3'   // adds /opt/maven/bin to PATH for every sh step
-        jdk   'JDK17'    // ensures the right JDK is on PATH for mvn and javac
+        maven 'maven'   // adds /opt/maven/bin to PATH for every sh step
     }
 
     // ── Pipeline-level environment variables ─────────────────────────────────
