@@ -11,6 +11,14 @@ pipeline {
     // Run on any available agent (label it if you have dedicated build nodes)
     agent any
 
+    // ── Tool installations ────────────────────────────────────────────────────
+    // Names MUST match what is configured in:
+    // Manage Jenkins → Tools → Maven installations / JDK installations
+    tools {
+        maven 'Maven3'   // adds /opt/maven/bin to PATH for every sh step
+        jdk   'JDK17'    // ensures the right JDK is on PATH for mvn and javac
+    }
+
     // ── Pipeline-level environment variables ─────────────────────────────────
     // Override these at build time via "Build with Parameters" or in the
     // Jenkins job configuration — never hardcode secrets here.
