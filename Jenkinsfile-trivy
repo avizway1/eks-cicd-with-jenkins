@@ -6,6 +6,15 @@
 //
 // Install Trivy on the Jenkins EC2 (one-time):
 //   sudo rpm -ivh https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Linux-64bit.rpm
+//
+// Disk-space fix — run these on the Jenkins EC2 if /tmp is full:
+//   docker system prune -af          ← reclaim space from unused images/containers
+//   sudo rm -rf /tmp/trivy-*         ← remove stale Trivy temp files
+//
+// Cache strategy:
+//   TRIVY_CACHE_DIR = /var/lib/jenkins/.cache/trivy
+//   The Trivy vuln-db (~50 MB) and Java DB (~200 MB) are downloaded here ONCE
+//   and reused on every subsequent build — no repeated /tmp writes.
 // =============================================================================
 
 pipeline {
@@ -27,6 +36,11 @@ pipeline {
         CLUSTER_NAME    = "${params.CLUSTER_NAME}"
         K8S_NAMESPACE   = "${params.K8S_NAMESPACE}"
         APP_NAME        = "eks-cicd-app"
+
+        // Persistent Trivy cache — survives between builds.
+        // Java DB (~200 MB) and vuln-db (~50 MB) are downloaded here ONCE
+        // and reused every run instead of being written to /tmp each time.
+        TRIVY_CACHE_DIR = "/var/lib/jenkins/.cache/trivy"
     }
 
     parameters {
@@ -91,13 +105,17 @@ pipeline {
             steps {
                 echo "Running Trivy filesystem scan..."
                 sh """
+                    mkdir -p ${TRIVY_CACHE_DIR}
+
                     trivy fs \
                         --exit-code 0 \
                         --severity HIGH,CRITICAL \
                         --no-progress \
+                        --cache-dir ${TRIVY_CACHE_DIR} \
                         --format table \
                         --output trivy-fs-report.txt \
                         .
+
                     echo "──── Trivy FS Scan Results ────"
                     cat trivy-fs-report.txt
                 """
@@ -127,40 +145,48 @@ pipeline {
 
         // ── 5. Trivy Image Scan ───────────────────────────────────────────────
         // Scans the freshly built Docker image for OS + library CVEs.
-        // Two outputs:
-        //   • trivy-image-report.txt  — human-readable table (archived)
-        //   • trivy-image-report.json — machine-readable (archived for tooling)
-        // FAIL_ON_CRITICAL parameter controls whether CRITICAL findings abort
-        // the pipeline (exit-code 1) or just warn (exit-code 0).
+        // Uses the persistent TRIVY_CACHE_DIR — Java DB (~200 MB) is
+        // downloaded only on the FIRST run; all subsequent builds reuse it.
+        //
+        // Two passes (table then JSON) share the same cached DB — no
+        // extra downloads on the second pass.
+        //
+        // FAIL_ON_CRITICAL param:
+        //   true  → exit-code 1 on CRITICAL findings (blocks pipeline)
+        //   false → exit-code 0 always (audit / warn only)
         stage('Trivy Image Scan') {
             steps {
                 echo "Running Trivy image scan on: ${FULL_IMAGE}"
                 script {
                     def exitCode = params.FAIL_ON_CRITICAL ? '1' : '0'
 
-                    // Table report — printed to console + archived
+                    // Pass 1 — table report (human-readable, console + archive)
                     sh """
                         trivy image \
                             --exit-code ${exitCode} \
                             --severity HIGH,CRITICAL \
                             --no-progress \
+                            --cache-dir ${TRIVY_CACHE_DIR} \
                             --format table \
                             --output trivy-image-report.txt \
                             ${FULL_IMAGE}
+
+                        echo "──── Trivy Image Scan Results ────"
+                        cat trivy-image-report.txt
                     """
 
-                    // JSON report — always generated regardless of exit-code
+                    // Pass 2 — JSON report (machine-readable, never fails build)
                     sh """
                         trivy image \
                             --exit-code 0 \
                             --severity HIGH,CRITICAL \
                             --no-progress \
+                            --cache-dir ${TRIVY_CACHE_DIR} \
+                            --skip-db-update \
+                            --skip-java-db-update \
                             --format json \
                             --output trivy-image-report.json \
                             ${FULL_IMAGE}
-
-                        echo "──── Trivy Image Scan Results ────"
-                        cat trivy-image-report.txt
                     """
                 }
             }
