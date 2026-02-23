@@ -199,27 +199,28 @@ pipeline {
         }
 
         // ── 6. Smoke Test ─────────────────────────────────────────────────
+        // Hits the NodePort (30080) on the first node's internal IP.
+        // Jenkins EC2 must be in the same VPC as the EKS nodes.
         stage('Smoke Test') {
             steps {
-                echo "Running post-deployment smoke test..."
+                echo "Running post-deployment smoke test via NodePort..."
                 script {
-                    // Give the pod a moment after rollout before probing
                     sleep(time: 10, unit: 'SECONDS')
 
-                    def svcIP = sh(
+                    def nodeIP = sh(
                         script: """
-                            kubectl get svc ${APP_NAME}-service \
-                                --namespace ${K8S_NAMESPACE} \
-                                -o jsonpath='{.status.loadBalancer.ingress[0].hostname}'
+                            kubectl get nodes \
+                                -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
+                                --namespace ${K8S_NAMESPACE}
                         """,
                         returnStdout: true
                     ).trim()
 
-                    if (svcIP) {
-                        sh "curl --fail --silent --max-time 10 http://${svcIP}:8080/actuator/health"
-                        echo "Smoke test passed — service is healthy."
+                    if (nodeIP) {
+                        sh "curl --fail --silent --max-time 10 http://${nodeIP}:30080/actuator/health"
+                        echo "Smoke test passed — app is reachable on NodePort 30080."
                     } else {
-                        echo "LoadBalancer hostname not yet available; skipping HTTP smoke test."
+                        echo "Could not resolve node IP; skipping smoke test."
                     }
                 }
             }
