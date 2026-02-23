@@ -45,7 +45,7 @@ pipeline {
     // ── User-overridable parameters ──────────────────────────────────────────
     parameters {
         string(name: 'AWS_ACCOUNT_ID',
-               defaultValue: '',
+               defaultValue: '655700896650',
                description: 'AWS Account ID (12 digits)')
 
         string(name: 'REGION',
