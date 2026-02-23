@@ -1,0 +1,263 @@
+// =============================================================================
+// Declarative Jenkins Pipeline — EKS CI/CD  +  Trivy Security Scanning
+// Extends the base pipeline with two Trivy stages:
+//   • Trivy FS Scan   — scans source + dependencies BEFORE Docker build
+//   • Trivy Image Scan — scans the built Docker image BEFORE ECR push
+//
+// Install Trivy on the Jenkins EC2 (one-time):
+//   sudo rpm -ivh https://github.com/aquasecurity/trivy/releases/latest/download/trivy_Linux-64bit.rpm
+// =============================================================================
+
+pipeline {
+
+    agent any
+
+    tools {
+        maven 'maven'
+    }
+
+    environment {
+        AWS_ACCOUNT_ID  = "${params.AWS_ACCOUNT_ID}"
+        REGION          = "${params.REGION}"
+        ECR_REPO_NAME   = "${params.ECR_REPO_NAME}"
+        ECR_REGISTRY    = "${AWS_ACCOUNT_ID}.dkr.ecr.${REGION}.amazonaws.com"
+        IMAGE_TAG       = "${BUILD_NUMBER}"
+        FULL_IMAGE      = "${ECR_REGISTRY}/${ECR_REPO_NAME}:${IMAGE_TAG}"
+
+        CLUSTER_NAME    = "${params.CLUSTER_NAME}"
+        K8S_NAMESPACE   = "${params.K8S_NAMESPACE}"
+        APP_NAME        = "eks-cicd-app"
+    }
+
+    parameters {
+        string(name: 'AWS_ACCOUNT_ID',  defaultValue: '655700896650',   description: 'AWS Account ID')
+        string(name: 'REGION',          defaultValue: 'ap-south-1',     description: 'AWS region')
+        string(name: 'ECR_REPO_NAME',   defaultValue: 'eks-cicd',       description: 'ECR repository name')
+        string(name: 'CLUSTER_NAME',    defaultValue: 'ekswithavinash', description: 'EKS cluster name')
+        string(name: 'K8S_NAMESPACE',   defaultValue: 'eks-cicd',       description: 'Kubernetes namespace')
+        booleanParam(name: 'SKIP_TESTS',         defaultValue: false,   description: 'Skip Maven unit tests')
+        booleanParam(name: 'FAIL_ON_CRITICAL',   defaultValue: true,    description: 'Fail pipeline if CRITICAL CVEs found in image scan')
+    }
+
+    options {
+        buildDiscarder(logRotator(numToKeepStr: '10'))
+        timeout(time: 30, unit: 'MINUTES')
+        timestamps()
+        disableConcurrentBuilds()
+    }
+
+    stages {
+
+        // ── 1. Checkout ───────────────────────────────────────────────────────
+        stage('Checkout') {
+            steps {
+                echo "Checking out source code..."
+                checkout scm
+                script {
+                    env.GIT_COMMIT_SHORT = sh(
+                        script: "git rev-parse --short HEAD",
+                        returnStdout: true
+                    ).trim()
+                    echo "Commit: ${env.GIT_COMMIT_SHORT}"
+                }
+            }
+        }
+
+        // ── 2. Build ──────────────────────────────────────────────────────────
+        stage('Build') {
+            steps {
+                echo "Building application with Maven..."
+                script {
+                    def mvnFlags = params.SKIP_TESTS ? '-DskipTests' : ''
+                    sh """
+                        mvn clean package ${mvnFlags} -B \
+                            --no-transfer-progress \
+                            -Dapp.version=${BUILD_NUMBER}
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'target/*.jar', fingerprint: true
+                }
+            }
+        }
+
+        // ── 3. Trivy FS Scan ──────────────────────────────────────────────────
+        // Scans the project filesystem (source code + Maven dependencies)
+        // for known CVEs before building the Docker image.
+        // exit-code 0 → never fails the build; results are for visibility only.
+        stage('Trivy FS Scan') {
+            steps {
+                echo "Running Trivy filesystem scan..."
+                sh """
+                    trivy fs \
+                        --exit-code 0 \
+                        --severity HIGH,CRITICAL \
+                        --no-progress \
+                        --format table \
+                        --output trivy-fs-report.txt \
+                        .
+                    echo "──── Trivy FS Scan Results ────"
+                    cat trivy-fs-report.txt
+                """
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-fs-report.txt', fingerprint: true
+                }
+            }
+        }
+
+        // ── 4. Docker Build ───────────────────────────────────────────────────
+        stage('Docker Build') {
+            steps {
+                echo "Building Docker image: ${FULL_IMAGE}"
+                sh """
+                    docker build \
+                        --build-arg BUILD_NUMBER=${BUILD_NUMBER} \
+                        --label "git-commit=${env.GIT_COMMIT_SHORT}" \
+                        --label "build-number=${BUILD_NUMBER}" \
+                        --tag  ${FULL_IMAGE} \
+                        --tag  ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest \
+                        .
+                """
+            }
+        }
+
+        // ── 5. Trivy Image Scan ───────────────────────────────────────────────
+        // Scans the freshly built Docker image for OS + library CVEs.
+        // Two outputs:
+        //   • trivy-image-report.txt  — human-readable table (archived)
+        //   • trivy-image-report.json — machine-readable (archived for tooling)
+        // FAIL_ON_CRITICAL parameter controls whether CRITICAL findings abort
+        // the pipeline (exit-code 1) or just warn (exit-code 0).
+        stage('Trivy Image Scan') {
+            steps {
+                echo "Running Trivy image scan on: ${FULL_IMAGE}"
+                script {
+                    def exitCode = params.FAIL_ON_CRITICAL ? '1' : '0'
+
+                    // Table report — printed to console + archived
+                    sh """
+                        trivy image \
+                            --exit-code ${exitCode} \
+                            --severity HIGH,CRITICAL \
+                            --no-progress \
+                            --format table \
+                            --output trivy-image-report.txt \
+                            ${FULL_IMAGE}
+                    """
+
+                    // JSON report — always generated regardless of exit-code
+                    sh """
+                        trivy image \
+                            --exit-code 0 \
+                            --severity HIGH,CRITICAL \
+                            --no-progress \
+                            --format json \
+                            --output trivy-image-report.json \
+                            ${FULL_IMAGE}
+
+                        echo "──── Trivy Image Scan Results ────"
+                        cat trivy-image-report.txt
+                    """
+                }
+            }
+            post {
+                always {
+                    archiveArtifacts artifacts: 'trivy-image-report.txt, trivy-image-report.json',
+                                     fingerprint: true
+                }
+                failure {
+                    echo "Trivy found CRITICAL vulnerabilities — pipeline blocked. Review trivy-image-report.txt."
+                }
+            }
+        }
+
+        // ── 6. ECR Login & Push ───────────────────────────────────────────────
+        stage('ECR Login & Push') {
+            steps {
+                echo "Pushing image to ECR: ${FULL_IMAGE}"
+                sh """
+                    aws ecr get-login-password --region ${REGION} | \
+                        docker login --username AWS \
+                                     --password-stdin ${ECR_REGISTRY}
+
+                    docker push ${FULL_IMAGE}
+                    docker push ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest
+                """
+            }
+            post {
+                always {
+                    sh """
+                        docker rmi ${FULL_IMAGE}                            || true
+                        docker rmi ${ECR_REGISTRY}/${ECR_REPO_NAME}:latest  || true
+                    """
+                }
+            }
+        }
+
+        // ── 7. Deploy to EKS ──────────────────────────────────────────────────
+        stage('Deploy to EKS') {
+            steps {
+                echo "Deploying to EKS cluster: ${CLUSTER_NAME}"
+                sh """
+                    aws eks update-kubeconfig \
+                        --region ${REGION} \
+                        --name   ${CLUSTER_NAME}
+
+                    kubectl apply -f k8s/namespace.yaml
+
+                    sed 's|IMAGE_PLACEHOLDER|${FULL_IMAGE}|g' k8s/deployment.yaml | \
+                        kubectl apply -f -
+
+                    kubectl apply -f k8s/service.yaml
+
+                    kubectl rollout status deployment/${APP_NAME} \
+                        --namespace ${K8S_NAMESPACE} \
+                        --timeout=5m
+                """
+            }
+        }
+
+        // ── 8. Smoke Test ─────────────────────────────────────────────────────
+        stage('Smoke Test') {
+            steps {
+                echo "Running smoke test inside the pod..."
+                script {
+                    sleep(time: 10, unit: 'SECONDS')
+
+                    def pod = sh(
+                        script: """
+                            kubectl get pod -n ${K8S_NAMESPACE} \
+                                -l app=${APP_NAME} \
+                                --field-selector=status.phase=Running \
+                                -o jsonpath='{.items[0].metadata.name}'
+                        """,
+                        returnStdout: true
+                    ).trim()
+
+                    if (pod) {
+                        sh "kubectl exec -n ${K8S_NAMESPACE} ${pod} -- curl -sf http://localhost:8080/actuator/health"
+                        echo "Smoke test passed."
+                    } else {
+                        echo "No running pod found — skipping smoke test."
+                    }
+                }
+            }
+        }
+    }
+
+    post {
+        success {
+            echo "BUILD SUCCESS — ${env.JOB_NAME} #${env.BUILD_NUMBER} (${currentBuild.durationString})"
+        }
+        failure {
+            echo "BUILD FAILED  — ${env.JOB_NAME} #${env.BUILD_NUMBER} — check console output above."
+        }
+        always {
+            cleanWs()
+        }
+    }
+}
