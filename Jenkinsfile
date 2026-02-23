@@ -3,7 +3,7 @@
 // Auth    : EC2 Instance Profile (no hardcoded credentials)
 // Registry: Amazon ECR
 // Deploy  : EKS rolling update via kubectl
-// Notify  : Slack (success / failure)
+// Notify  : Console echo (install Slack plugin to enable slackSend)
 // =============================================================================
 
 pipeline {
@@ -35,11 +35,6 @@ pipeline {
         K8S_NAMESPACE   = "${params.K8S_NAMESPACE}"
         APP_NAME        = "eks-cicd-app"
 
-        // ── Slack ─────────────────────────────────────────────────────────
-        SLACK_CHANNEL   = "${params.SLACK_CHANNEL}"
-        // SLACK_CREDENTIAL is the ID of the Jenkins credential that stores
-        // the Slack Bot token (added via "Manage Jenkins → Credentials").
-        SLACK_CREDENTIAL = "slack-bot-token"
     }
 
     // ── User-overridable parameters ──────────────────────────────────────────
@@ -63,10 +58,6 @@ pipeline {
         string(name: 'K8S_NAMESPACE',
                defaultValue: 'eks-cicd',
                description: 'Kubernetes namespace to deploy into')
-
-        string(name: 'SLACK_CHANNEL',
-               defaultValue: '#eks-cicd-alerts',
-               description: 'Slack channel for build notifications')
 
         booleanParam(name: 'SKIP_TESTS',
                      defaultValue: false,
@@ -199,81 +190,42 @@ pipeline {
         }
 
         // ── 6. Smoke Test ─────────────────────────────────────────────────
-        // Hits the NodePort (30080) on the first node's internal IP.
-        // Jenkins EC2 must be in the same VPC as the EKS nodes.
+        // Curls /actuator/health from inside the pod — no NodePort/SG needed.
         stage('Smoke Test') {
             steps {
-                echo "Running post-deployment smoke test via NodePort..."
+                echo "Running smoke test inside the pod..."
                 script {
                     sleep(time: 10, unit: 'SECONDS')
 
-                    def nodeIP = sh(
+                    def pod = sh(
                         script: """
-                            kubectl get nodes \
-                                -o jsonpath='{.items[0].status.addresses[?(@.type=="InternalIP")].address}' \
-                                --namespace ${K8S_NAMESPACE}
+                            kubectl get pod -n ${K8S_NAMESPACE} \
+                                -l app=${APP_NAME} \
+                                --field-selector=status.phase=Running \
+                                -o jsonpath='{.items[0].metadata.name}'
                         """,
                         returnStdout: true
                     ).trim()
 
-                    if (nodeIP) {
-                        sh "curl --fail --silent --max-time 10 http://${nodeIP}:30080/actuator/health"
-                        echo "Smoke test passed — app is reachable on NodePort 30080."
+                    if (pod) {
+                        sh "kubectl exec -n ${K8S_NAMESPACE} ${pod} -- curl -sf http://localhost:8080/actuator/health"
+                        echo "Smoke test passed."
                     } else {
-                        echo "Could not resolve node IP; skipping smoke test."
+                        echo "No running pod found — skipping smoke test."
                     }
                 }
             }
         }
     }
 
-    // ── Post-pipeline notifications ───────────────────────────────────────────
     post {
         success {
-            echo "Pipeline completed successfully."
-            slackSend(
-                channel:     "${SLACK_CHANNEL}",
-                color:       'good',
-                tokenCredentialId: "${SLACK_CREDENTIAL}",
-                message: """:white_check_mark: *BUILD SUCCESS*
-*Job*      : ${env.JOB_NAME}
-*Build*    : #${env.BUILD_NUMBER}
-*Commit*   : ${env.GIT_COMMIT_SHORT}
-*Image*    : `${FULL_IMAGE}`
-*Duration* : ${currentBuild.durationString}
-<${env.BUILD_URL}|View Build>"""
-            )
+            echo "BUILD SUCCESS — ${env.JOB_NAME} #${env.BUILD_NUMBER} (${currentBuild.durationString})"
         }
-
         failure {
-            echo "Pipeline failed."
-            slackSend(
-                channel:     "${SLACK_CHANNEL}",
-                color:       'danger',
-                tokenCredentialId: "${SLACK_CREDENTIAL}",
-                message: """:x: *BUILD FAILED*
-*Job*      : ${env.JOB_NAME}
-*Build*    : #${env.BUILD_NUMBER}
-*Stage*    : ${env.STAGE_NAME ?: 'unknown'}
-*Duration* : ${currentBuild.durationString}
-<${env.BUILD_URL}console|View Console Log>"""
-            )
+            echo "BUILD FAILED  — ${env.JOB_NAME} #${env.BUILD_NUMBER} — check console output above."
         }
-
-        unstable {
-            slackSend(
-                channel:     "${SLACK_CHANNEL}",
-                color:       'warning',
-                tokenCredentialId: "${SLACK_CREDENTIAL}",
-                message: """:warning: *BUILD UNSTABLE*
-*Job*   : ${env.JOB_NAME}
-*Build* : #${env.BUILD_NUMBER}
-<${env.BUILD_URL}|View Build>"""
-            )
-        }
-
         always {
-            // Clean workspace to prevent stale artifacts across builds
             cleanWs()
         }
     }
