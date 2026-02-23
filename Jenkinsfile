@@ -231,7 +231,7 @@ pipeline {
 *Job*      : ${env.JOB_NAME}
 *Build*    : #${env.BUILD_NUMBER}
 *Commit*   : ${env.GIT_COMMIT_SHORT}
-*Image*    : \`${FULL_IMAGE}\`
+*Image*    : `${FULL_IMAGE}`
 *Duration* : ${currentBuild.durationString}
 <${env.BUILD_URL}|View Build>"""
             )
